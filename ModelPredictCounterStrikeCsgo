@@ -1,0 +1,80 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import MinMaxScaler
+from tabulate import tabulate
+import warnings
+import pickle
+import absl.logging
+absl.logging.set_verbosity(absl.logging.ERROR)
+warnings.filterwarnings('ignore')
+# Extrair os dados de times e placares
+teams, scores = [], []
+nrpadrao = 0
+for i in range(3):
+    nrpadrao += 1
+    url = f"https://www.hltv.org/results?offset={nrpadrao}00"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, "html.parser")
+    results = soup.select(".result-con")
+
+    for result in results:
+        team1, team2 = result.select(".team1 .team")[0].text, result.select(".team2 .team")[0].text
+        score1, score2 = result.select(".score-lost")[0].text, result.select(".score-won")[0].text
+        teams.append([team1, team2]), scores.append([score1, score2])
+
+# Cria um dataframe a partir das listas
+df = pd.DataFrame(teams, columns=["Team 1", "Team 2"])
+df[["Score 1", "Score 2"]] = pd.DataFrame(scores)
+df["Winner"] = (df["Score 1"] > df["Score 2"]).astype(int)
+
+# Salvar o dataframe em um arquivo CSV
+df.to_csv("results.csv", index=False)
+
+# Separar os dados de treino e teste
+X_train, X_test, y_train, y_test = train_test_split(df[["Score 1", "Score 2"]], df["Winner"], test_size=0.2,random_state=42)
+
+# Normalizar os valores de entrada
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# Treinar o modelo de regressão logística
+model = LogisticRegression().fit(X_train, y_train)
+
+# Salvar o modelo em um arquivo
+with open('model2.pkl', 'wb') as f:
+    pickle.dump(model, f)
+
+with open('model2.pkl', 'rb') as f:
+    model = pickle.load(f)
+# Fazer previsões nos dados de teste
+y_pred = model.predict(X_test)
+
+# Calcular a acurácia do modelo nos dados de teste
+acc = accuracy_score(y_test, y_pred)
+print("Accuracy:", acc)
+from sklearn.metrics import precision_score
+precision = precision_score(y_test, y_pred, labels=[0,1])
+
+# Calcular a log loss
+from sklearn.metrics import log_loss
+log_loss = log_loss(y_test, y_pred, labels=[0,1])
+
+# Exibir os resultados
+print("Precision:", precision)
+print("Log Loss:", log_loss)
+# Fazer previsões de probabilidade nos dados de teste
+time1 = input("Insira o nome do Time 1: ")
+time2 = input("Insira o nome do Time 2: ")
+team1_last_results = df[(df["Team 1"] == time1) | (df["Team 2"] == time1)].tail(5)
+team2_last_results = df[(df["Team 1"] == time2) | (df["Team 2"] == time2)].tail(5)
+team1_mean_score = team1_last_results.mean()["Score 1"]
+team2_mean_score = team2_last_results.mean()["Score 2"]
+prob_team1_win = model.predict_proba(scaler.transform([[team1_mean_score, team2_mean_score]]))[0][1]
+prob_team2_win = 1 - prob_team1_win
+print("Probabilidade de vitória do Time 1:", prob_team1_win)
+print("Probabilidade de vitória do Time 2:", prob_team2_win)
